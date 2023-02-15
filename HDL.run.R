@@ -14,10 +14,17 @@ N0 <- gsub(x = args[grep(x = args, pattern = "N0=")], pattern = "N0=", replaceme
 output.file <- gsub(x = args[grep(x = args, pattern = "output.file=")], pattern = "output.file=", replacement = "")
 eigen.cut <- gsub(x = args[grep(x = args, pattern = "eigen.cut=")], pattern = "eigen.cut=", replacement = "")
 jackknife.df <- gsub(x = args[grep(x = args, pattern = "jackknife.df=")], pattern = "jackknife.df=", replacement = "")
+fill.missing.N <- gsub(x = args[grep(x = args, pattern = "fill.missing.N=")], pattern = "fill.missing.N=", replacement = "")
+intercept.output <- gsub(x = args[grep(x = args, pattern = "intercept.output=")], pattern = "intercept.output=", replacement = "")
 
-if(length(output.file) == 0){
-  length(output.file) <- ""
-}
+
+## default arguments
+Nref <- ifelse(length(Nref)==0, 335265, as.numeric(Nref))
+eigen.cut <- ifelse(length(eigen.cut)==0, "automatic", as.numeric(eigen.cut))
+jackknife.df <- ifelse(length(jackknife.df)==0, FALSE, as.logical(jackknife.df))
+if(!any(fill.missing.N==c("median", "min", "max"))) fill.missing.N <- NULL
+output.file <- ifelse(length(output.file)==0, "", output.file)
+
 
 # CHANGED stopping if file exists
 if(output.file != ""){
@@ -34,6 +41,7 @@ if(data.table.version < "1.12.1"){
   detach("package:data.table", unload=TRUE)
   library(data.table, lib.loc = Sys.getenv("R_LIBS_USER"))
 }
+
 
 
 smart.reader <- function(path){
@@ -71,20 +79,16 @@ if(length(gwas.df.path) == 0 && length(gwas1.df.path) != 0 && length(gwas2.df.pa
   cat(message)
   gwas2.df <- smart.reader(gwas2.df.path)
   
-  if(length(Nref)==0)
-    Nref <- 335265
   if(length(N0) == 0)
     N0 <- min(gwas1.df$N, gwas2.df$N)
-  if(length(eigen.cut)==0)
-    eigen.cut <- "automatic"
-  if(length(jackknife.df)==0)
-    jackknife.df <- FALSE
+  
   
   ##### Run HDL.rg #####
   
   library(HDL)
   res.HDL <- HDL.rg(gwas1.df, gwas2.df, LD.path, Nref = Nref, N0 = N0, 
-                    output.file = output.file, eigen.cut = eigen.cut, jackknife.df = jackknife.df)
+                    output.file = output.file, eigen.cut = eigen.cut, jackknife.df = jackknife.df,
+                    fill.missing.N = fill.missing.N)
   
   if(output.file != ""){
     fConn <- file(output.file)
@@ -103,15 +107,13 @@ if(length(gwas.df.path) == 0 && length(gwas1.df.path) != 0 && length(gwas2.df.pa
   cat(message)
   gwas.df <- smart.reader(gwas.df.path)
   
-  if(length(Nref)==0)
-    Nref <- 335265
-  if(length(eigen.cut)==0)
-    eigen.cut <- "automatic"
+
   
   ##### Run HDL.h2 #####
   
   library(HDL)
-  res.HDL <- HDL.h2(gwas.df, LD.path, Nref = Nref, output.file = output.file, eigen.cut = eigen.cut)
+  res.HDL <- HDL.h2(gwas.df, LD.path, Nref = Nref, output.file = output.file, eigen.cut = eigen.cut,
+                    fill.missing.N = fill.missing.N)
   
   if(output.file != ""){
     fConn <- file(output.file)

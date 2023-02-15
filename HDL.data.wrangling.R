@@ -79,15 +79,16 @@ if(length(log.file) != 0){
 }
 
 LD.files <- list.files(LD.path)
-if(any(grepl(x = LD.files, pattern = "UKB_snp_counter.*"))){
-  snp_counter_file <- LD.files[grep(x = LD.files, pattern = "UKB_snp_counter.*")]
-  snp_list_file <- LD.files[grep(x = LD.files, pattern = "UKB_snp_list.*")]
+if(any(grepl(x = LD.files, pattern = ".*_snp_counter.*"))){
+  snp_counter_file <- LD.files[grep(x = LD.files, pattern = ".*_snp_counter.*")]
+  snp_list_file <- LD.files[grep(x = LD.files, pattern = ".*_snp_list.*")]
   load(file=paste(LD.path, snp_counter_file, sep = "/"))
   load(file=paste(LD.path, snp_list_file, sep = "/"))
   if("nsnps.list.imputed" %in% ls()){
     snps.name.list <- snps.list.imputed.vector
     nsnps.list <- nsnps.list.imputed
   }
+  if(is.null(names(nsnps.list))) names(nsnps.list) <- as.character(1:length(nsnps.list))
 } else{
   error.message <- "It seems this directory does not contain all files needed for HDL. Please check your LD.path again. The current version of HDL only support pre-computed LD reference panels."
   if(output.file != ""){
@@ -125,8 +126,17 @@ if(length(GWAS.type) == 0){
   } else{
     gwas.hdl.df <- gwas.all %>%
       rename_(SNP = SNP, A1 = A1, A2 = A2, N = N, b = b, se = se) %>%
-      filter(SNP %in% snps.name.list) %>% mutate(Z = (b/se)) %>%
-      select(SNP, A1, A2, N, Z)
+      filter(SNP %in% snps.name.list)
+    
+    # b is likely to be OR in stead of log(OR)
+    if(abs(median(gwas.hdl.df$b) - 1) < 0.1){
+      cat("Taking log(b) because b is likely to be OR in stead of log(OR). \n")
+      if(length(log.file) != 0){
+        cat("Taking log(b) because b is likely to be OR in stead of log(OR). \n", file = log.file, append = T)
+      }
+      gwas.hdl.df <- gwas.hdl.df %>% mutate(b = log(b)) %>%
+        mutate(Z = (b/se)) %>% select(SNP, A1, A2, N, Z)
+    }
   }
 }
 cat("Data wrangling completed. \n")

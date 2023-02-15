@@ -16,6 +16,7 @@
 #' @param eigen.cut Which eigenvalues and eigenvectors in each LD score matrix should be used for HDL. 
 #' Users are allowed to specify a numeric value between 0 and 1 for eigen.cut. For example, eigen.cut = 0.99 means using the leading eigenvalues explaining 99% of the variance
 #' and their correspondent eigenvectors. If the default 'automatic' is used, the eigen.cut gives the most stable heritability estimates will be used. 
+#' @param lim Tolerance limitation, default lim = exp(-18). 
 #' @note Users can download the precomputed eigenvalues and eigenvectors of LD correlation matrices for European ancestry population. The download link can be found at https://github.com/zhenin/HDL/wiki/Reference-panels
 #' These are the LD matrices and their eigen-decomposition from 335,265 genomic British UK Biobank individuals. Two sets of reference panel are provided: 
 #' 1) 307,519 QCed UK Biobank Axiom Array SNPs. The size is about 7.5 GB after unzipping.
@@ -61,7 +62,7 @@
 
 HDL.rg <-
   function(gwas1.df, gwas2.df, LD.path, Nref = 335265, N0 = min(gwas1.df$N, gwas2.df$N), output.file = "", eigen.cut = "automatic", 
-           jackknife.df = FALSE){
+           jackknife.df = FALSE, intercept.output = FALSE, fill.missing.N = NULL, lim = exp(-18)){
     
     if(output.file != ""){
       if(file.exists(output.file) == T){
@@ -97,15 +98,16 @@ HDL.rg <-
     
     LD.files <- list.files(LD.path)
     
-    if(any(grepl(x = LD.files, pattern = "UKB_snp_counter.*"))){
-      snp_counter_file <- LD.files[grep(x = LD.files, pattern = "UKB_snp_counter.*")]
-      snp_list_file <- LD.files[grep(x = LD.files, pattern = "UKB_snp_list.*")]
+    if(any(grepl(x = LD.files, pattern = ".*_snp_counter.*"))){
+      snp_counter_file <- LD.files[grep(x = LD.files, pattern = ".*_snp_counter.*")]
+      snp_list_file <- LD.files[grep(x = LD.files, pattern = ".*_snp_list.*")]
       load(file=paste(LD.path, snp_counter_file, sep = "/"))
       load(file=paste(LD.path, snp_list_file, sep = "/"))
       if("nsnps.list.imputed" %in% ls()){
         snps.name.list <- snps.list.imputed.vector
         nsnps.list <- nsnps.list.imputed
       }
+      if(is.null(names(nsnps.list))) names(nsnps.list) <- as.character(1:length(nsnps.list))
     } else{
       error.message <- "It seems this directory does not contain all files needed for HDL. Please check your LD.path again. The current version of HDL only support pre-computed LD reference panels."
       if(output.file != ""){
@@ -125,9 +127,17 @@ HDL.rg <-
     
     if(!("Z" %in% colnames(gwas1.df))){
       if(("b" %in% colnames(gwas1.df)) && ("se" %in% colnames(gwas1.df))){
-        gwas1.df$Z <- gwas1.df$b / gwas1.df$se
+        if(abs(median(gwas1.df$b) - 1) < 0.1){
+          cat("Taking log(b) in GWAS 1 because b is likely to be OR in stead of log(OR). \n")
+          if(output.file != ""){
+            cat("Taking log(b) in GWAS 1 because b is likely to be OR in stead of log(OR). \n", file = output.file, append = T)
+          }
+          gwas1.df$Z <- log(gwas1.df$b) / gwas1.df$se
+        } else{
+          gwas1.df$Z <- gwas1.df$b / gwas1.df$se
+        }
       } else{
-        error.message <- "Z is not available, meanwhile either b or se is missing. Please check."
+        error.message <- "Z is not available in GWAS 1, meanwhile either b or se is missing. Please check."
         if(output.file != ""){
           cat(error.message, file = output.file, append = T)
         }
@@ -138,9 +148,17 @@ HDL.rg <-
     
     if(!("Z" %in% colnames(gwas2.df))){
       if(("b" %in% colnames(gwas2.df)) && ("se" %in% colnames(gwas2.df))){
-        gwas2.df$Z <- gwas2.df$b / gwas2.df$se
+        if(abs(median(gwas2.df$b) - 1) < 0.1){
+          cat("Taking log(b) in GWAS 2 because b is likely to be OR in stead of log(OR). \n")
+          if(output.file != ""){
+            cat("Taking log(b) in GWAS 2 because b is likely to be OR in stead of log(OR). \n", file = output.file, append = T)
+          }
+          gwas2.df$Z <- log(gwas2.df$b) / gwas2.df$se
+        } else{
+          gwas2.df$Z <- gwas2.df$b / gwas2.df$se
+        }
       } else{
-        error.message <- "Z is not available, meanwhile either b or se is missing. Please check."
+        error.message <- "Z is not available in GWAS 2, meanwhile either b or se is missing. Please check."
         if(output.file != ""){
           cat(error.message, file = output.file, append = T)
         }
@@ -149,14 +167,49 @@ HDL.rg <-
       }
     }
     
-    gwas1.df <- gwas1.df %>% filter(!is.na(Z), !is.na(N))
-    gwas2.df <- gwas2.df %>% filter(!is.na(Z), !is.na(N))
+    k1.0 <- length(unique(gwas1.df$SNP))
+    k2.0 <- length(unique(gwas2.df$SNP))
     
+    if(is.null(fill.missing.N)){
+      gwas1.df <- gwas1.df %>% filter(!is.na(Z), !is.na(N))
+      gwas2.df <- gwas2.df %>% filter(!is.na(Z), !is.na(N))
+    } else if(fill.missing.N == "min"){
+      gwas1.df <- gwas1.df %>% filter(!is.na(Z))
+      gwas1.df$N[is.na(gwas1.df$N)] <- min(gwas1.df$N, na.rm = T)
+      
+      gwas2.df <- gwas2.df %>% filter(!is.na(Z))
+      gwas2.df$N[is.na(gwas2.df$N)] <- min(gwas2.df$N, na.rm = T)
+    } else if(fill.missing.N == "max"){
+      gwas1.df <- gwas1.df %>% filter(!is.na(Z))
+      gwas1.df$N[is.na(gwas1.df$N)] <- max(gwas1.df$N, na.rm = T)
+      
+      gwas2.df <- gwas2.df %>% filter(!is.na(Z))
+      gwas2.df$N[is.na(gwas2.df$N)] <- max(gwas2.df$N, na.rm = T)
+    } else if(fill.missing.N == "median"){
+      gwas1.df <- gwas1.df %>% filter(!is.na(Z))
+      gwas1.df$N[is.na(gwas1.df$N)] <- median(gwas1.df$N, na.rm = T)
+      
+      gwas2.df <- gwas2.df %>% filter(!is.na(Z))
+      gwas2.df$N[is.na(gwas2.df$N)] <- median(gwas2.df$N, na.rm = T)
+    } else{
+      error.message <- "If given, the argument fill.missing.N can only be one of below: 'min', 'max', 'median'."
+      if(output.file != ""){
+        cat(error.message, file = output.file, append = T)
+      }
+      stop(error.message)
+    }
     
-    k1 <- nrow(gwas1.df)
-    k2 <- nrow(gwas2.df)
+    k1 <- length(unique(gwas1.df$SNP))
+    k2 <- length(unique(gwas2.df$SNP))
     k1.percent <- paste("(",round(100*k1 / length(snps.name.list), 2), "%)", sep="") 
     k2.percent <- paste("(",round(100*k2 / length(snps.name.list), 2), "%)", sep="") 
+    
+    cat(k1.0 - k1, "SNPs were removed in GWAS 1 due to missing N or missing test statistic."," \n")
+    cat(k2.0 - k2, "SNPs were removed in GWAS 2 due to missing N or missing test statistic."," \n")
+    if(output.file != ""){
+      cat(k1.0 - k1, " SNPs were removed in GWAS 1 due to missing N or missing test statistic."," \n", file = output.file, append = T)
+      cat(k2.0 - k2, " SNPs were removed in GWAS 2 due to missing N or missing test statistic."," \n", file = output.file, append = T)
+    }
     
     cat(k1, "out of", length(snps.name.list), k1.percent, "SNPs in reference panel are available in GWAS 1."," \n")
     cat(k2, "out of", length(snps.name.list), k2.percent, "SNPs in reference panel are available in GWAS 2."," \n")
@@ -182,8 +235,8 @@ HDL.rg <-
     
     
     ## stats
-    N1 <- median(gwas1.df[, "N"])
-    N2 <- median(gwas2.df[, "N"])
+    N1 <- median(gwas1.df$N)
+    N2 <- median(gwas2.df$N)
     N <- sqrt(N1)*sqrt(N2)
     
     ## samples for phenotypes
@@ -198,14 +251,14 @@ HDL.rg <-
     counter <- 0
     message <- ""
     num.pieces <- length(unlist(nsnps.list))
-    for(chr in 1:22){
+    for(chr in names(nsnps.list)){
       k <- length(nsnps.list[[chr]])
       for(piece in 1:k){
         
         ## reference sample ##
         
-        LD_rda_file <- LD.files[grep(x = LD.files, pattern = paste0("chr",chr,".",piece, ".*rda"))]
-        LD_bim_file <- LD.files[grep(x = LD.files, pattern = paste0("chr",chr,".",piece, ".*bim"))]
+        LD_rda_file <- LD.files[grep(x = LD.files, pattern = paste0("chr",chr,".",piece, "[\\._].*rda"))]
+        LD_bim_file <- LD.files[grep(x = LD.files, pattern = paste0("chr",chr,".",piece, "[\\._].*bim"))]
         load(file=paste(LD.path, LD_rda_file, sep = "/"))
         snps.ref.df <- read.table(paste(LD.path, LD_bim_file, sep = "/"))
         
@@ -214,14 +267,45 @@ HDL.rg <-
         A2.ref <- snps.ref.df$A2
         names(A2.ref) <- snps.ref
         
-        gwas1.df.subset <- gwas1.df %>% filter(SNP %in% snps.ref)
+        gwas1.df.subset <- gwas1.df %>% filter(SNP %in% snps.ref) %>% distinct(SNP, A1, A2, .keep_all = TRUE)
+        
+        ## Check if there are multiallelic or duplicated SNPs
+        if(any(duplicated(gwas1.df.subset$SNP)) == TRUE){
+          gwas1.df.subset.duplicated <- gwas1.df.subset %>% 
+            mutate(row.num = 1:n()) %>% 
+            filter(SNP == SNP[duplicated(SNP)]) %>%
+            mutate(SNP_A1_A2 = paste(SNP, A1, A2, sep = "_"))
+          snps.ref.df.duplicated <- snps.ref.df %>%
+            filter(id %in% gwas1.df.subset.duplicated$SNP)
+          SNP_A1_A2.valid <- c(paste(snps.ref.df.duplicated$id, snps.ref.df.duplicated$A1, snps.ref.df.duplicated$A2, sep = "_"),
+                               paste(snps.ref.df.duplicated$id, snps.ref.df.duplicated$A2, snps.ref.df.duplicated$A1, sep = "_"))
+          row.remove <- gwas1.df.subset.duplicated %>% filter(!(SNP_A1_A2 %in% SNP_A1_A2.valid)) %>% select(row.num) %>% unlist()
+          gwas1.df.subset <- gwas1.df.subset[-row.remove,]
+        }
+        
         bhat1.raw <- gwas1.df.subset[, "Z"] / sqrt(gwas1.df.subset[, "N"])
         A2.gwas1 <- gwas1.df.subset[, "A2"]
         names(bhat1.raw) <- names(A2.gwas1) <- gwas1.df.subset$SNP
         idx.sign1 <- A2.gwas1 == A2.ref[names(A2.gwas1)]
         bhat1.raw <- bhat1.raw*(2*as.numeric(idx.sign1)-1)
         
-        gwas2.df.subset <- gwas2.df %>% filter(SNP %in% snps.ref)
+        
+        
+        gwas2.df.subset <- gwas2.df %>% filter(SNP %in% snps.ref) %>% distinct(SNP, A1, A2, .keep_all = TRUE)
+        
+        ## Check if there are multiallelic or duplicated SNPs
+        if(any(duplicated(gwas2.df.subset$SNP)) == TRUE){
+          gwas2.df.subset.duplicated <- gwas2.df.subset %>% 
+            mutate(row.num = 1:n()) %>% 
+            filter(SNP == SNP[duplicated(SNP)]) %>%
+            mutate(SNP_A1_A2 = paste(SNP, A1, A2, sep = "_"))
+          snps.ref.df.duplicated <- snps.ref.df %>%
+            filter(id %in% gwas2.df.subset.duplicated$SNP)
+          SNP_A1_A2.valid <- c(paste(snps.ref.df.duplicated$id, snps.ref.df.duplicated$A1, snps.ref.df.duplicated$A2, sep = "_"),
+                               paste(snps.ref.df.duplicated$id, snps.ref.df.duplicated$A2, snps.ref.df.duplicated$A1, sep = "_"))
+          row.remove <- gwas2.df.subset.duplicated %>% filter(!(SNP_A1_A2 %in% SNP_A1_A2.valid)) %>% select(row.num) %>% unlist()
+          gwas2.df.subset <- gwas2.df.subset[-row.remove,]
+        }
         bhat2.raw <- gwas2.df.subset[, "Z"] / sqrt(gwas2.df.subset[, "N"])
         A2.gwas2 <- gwas2.df.subset[, "A2"]
         names(bhat2.raw) <- names(A2.gwas2) <- gwas2.df.subset$SNP
@@ -274,19 +358,19 @@ HDL.rg <-
         bstar2 = crossprod(V,bhat2)  ##
         
         opt = optim(c(h11.wls[2],1), llfun, N=N1, Nref=Nref, lam=lam, bstar=bstar1, M=M,
-                    lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                    lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
         
         h11.hdl = opt$par
         
         opt = optim(c(h22.wls[2],1), llfun, N=N2, Nref=Nref, lam=lam, bstar=bstar2, M=M,
-                    lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                    lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
         h22.hdl = opt$par
         
         opt=  optim(c(h12.wls[2],rho12), llfun.gcov.part.2, h11=h11.hdl, h22=h22.hdl, 
                     rho12=rho12, M=M, N1=N1, N2=N2, N0=N0, Nref=Nref, 
                     lam0=lam, lam1=lam, lam2=lam, 
                     bstar1=bstar1, bstar2=bstar2,
-                    lim=exp(-18), method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
+                    lim=lim, method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
         h12.hdl = opt$par
         
         HDL11.df <- rbind(HDL11.df, h11.hdl)
@@ -364,10 +448,10 @@ HDL.rg <-
       bstar2.v.90 <- mapply(eigen_select.fun,bstar2.v,eigen.num.v.90)
       
       opt = optim(c(h1_2,1), llfun, N=N1, Nref=Nref, lam=unlist(lam.v.90), bstar=unlist(bstar1.v.90), M=M.ref,
-                  lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                  lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
       h11.hdl.90 = opt$par
       opt = optim(c(h2_2,1), llfun, N=N2, Nref=Nref, lam=unlist(lam.v.90), bstar=unlist(bstar2.v.90), M=M.ref,
-                  lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                  lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
       h22.hdl.90 = opt$par
       
       if(sum(unlist(eigen.num.v.90)) == sum(unlist(eigen.num.v.95))){
@@ -383,10 +467,10 @@ HDL.rg <-
         bstar2.v.95 <- mapply(eigen_select.fun,bstar2.v,eigen.num.v.95)
         
         opt = optim(c(h1_2,1), llfun, N=N1, Nref=Nref, lam=unlist(lam.v.95), bstar=unlist(bstar1.v.95), M=M.ref,
-                    lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                    lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
         h11.hdl.95 = opt$par
         opt = optim(c(h2_2,1), llfun, N=N2, Nref=Nref, lam=unlist(lam.v.95), bstar=unlist(bstar2.v.95), M=M.ref,
-                    lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                    lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
         h22.hdl.95 = opt$par
         
         if(sum(unlist(eigen.num.v.95)) == sum(unlist(eigen.num.v.99))){
@@ -414,10 +498,10 @@ HDL.rg <-
           bstar2.v.99 <- mapply(eigen_select.fun,bstar2.v,eigen.num.v.99)
           
           opt = optim(c(h1_2,1), llfun, N=N1, Nref=Nref, lam=unlist(lam.v.99), bstar=unlist(bstar1.v.99), M=M.ref,
-                      lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                      lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
           h11.hdl.99 = opt$par
           opt = optim(c(h2_2,1), llfun, N=N2, Nref=Nref, lam=unlist(lam.v.99), bstar=unlist(bstar2.v.99), M=M.ref,
-                      lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                      lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
           h22.hdl.99 = opt$par
           
           if(h11.hdl.99[1] != 0 &&
@@ -474,10 +558,10 @@ HDL.rg <-
       bstar2.v.cut <- mapply(eigen_select.fun,bstar2.v,eigen.num.v.cut)
       
       opt = optim(c(h1_2,1), llfun, N=N1, Nref=Nref, lam=unlist(lam.v.cut), bstar=unlist(bstar1.v.cut), M=M.ref,
-                  lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                  lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
       h11.hdl.cut = opt$par
       opt = optim(c(h2_2,1), llfun, N=N2, Nref=Nref, lam=unlist(lam.v.cut), bstar=unlist(bstar2.v.cut), M=M.ref,
-                  lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                  lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
       h22.hdl.cut = opt$par
       
       lam.v.use <- lam.v.cut
@@ -494,7 +578,7 @@ HDL.rg <-
                 rho12=rho12, M=M.ref, N1=N1, N2=N2, N0=N0, Nref=Nref,
                 lam0=unlist(lam.v.use), lam1=unlist(lam.v.use), lam2=unlist(lam.v.use),
                 bstar1=unlist(bstar1.v.use), bstar2=unlist(bstar2.v.use),
-                lim=exp(-18), method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
+                lim=lim, method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
     if(opt$convergence != 0){
       starting.value.v <- c(0,-sqrt(h11*h22)*0.5, sqrt(h11*h22)*0.5)
       k <- 1
@@ -504,7 +588,7 @@ HDL.rg <-
                     rho12=rho12, M=M.ref, N1=N1, N2=N2, N0=N0, Nref=Nref,
                     lam0=unlist(lam.v.use), lam1=unlist(lam.v.use), lam2=unlist(lam.v.use),
                     bstar1=unlist(bstar1.v.use), bstar2=unlist(bstar2.v.use),
-                    lim=exp(-18), method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
+                    lim=lim, method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
         k <- k + 1
         if(k > length(starting.value.v)){
           error.message <- "Algorithm failed to converge after trying different initial values. \n"
@@ -518,6 +602,12 @@ HDL.rg <-
     h12.hdl.use <- opt$par
     h12 <- h12.hdl.use[1]
     rg <- h12.hdl.use[1]/sqrt(h11.hdl.use[1]*h22.hdl.use[1])
+    
+    if(intercept.output == T){
+      h11.intercept <- h11.hdl.use[2]
+      h22.intercept <- h22.hdl.use[2]
+      h12.intercept <- h12.hdl.use[2]
+    }
     
     output <- function(value){
       if(is.na(value)){
@@ -560,26 +650,35 @@ HDL.rg <-
     counter <- 0
     message <- ""
     rg.jackknife <- h11.jackknife <- h12.jackknife <- h22.jackknife <- numeric(length(lam.v))
+    if(intercept.output == T){
+      h11.intercept.jackknife <- h12.intercept.jackknife <- h22.intercept.jackknife <- numeric(length(lam.v))
+    }
     for(i in 1:length(lam.v)){
       opt = optim(h11.hdl.use, llfun, N=N1, Nref=Nref, lam=unlist(lam.v.use[-i]), bstar=unlist(bstar1.v.use[-i]), M=M.ref,
-                  lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                  lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
       h11.hdl.jackknife = opt$par
       
       
       opt = optim(h22.hdl.use, llfun, N=N2, Nref=Nref, lam=unlist(lam.v.use[-i]), bstar=unlist(bstar2.v.use[-i]), M=M.ref,
-                  lim=exp(-18), method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
+                  lim=lim, method ='L-BFGS-B', lower=c(0,0), upper=c(1,10))
       h22.hdl.jackknife = opt$par
       
       opt=  optim(h12.hdl.use, llfun.gcov.part.2, h11=h11.hdl.use, h22=h22.hdl.use,
                   rho12=rho12, M=M.ref, N1=N1, N2=N2, N0=N0, Nref=Nref,
                   lam0=unlist(lam.v.use[-i]), lam1=unlist(lam.v.use[-i]), lam2=unlist(lam.v.use[-i]),
                   bstar1=unlist(bstar1.v.use[-i]), bstar2=unlist(bstar2.v.use[-i]),
-                  lim=exp(-18), method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
+                  lim=lim, method ='L-BFGS-B', lower=c(-1,-10), upper=c(1,10))
       h12.hdl.jackknife = opt$par
       h11.jackknife[i] <- h11.hdl.jackknife[1]
       h12.jackknife[i] <- h12.hdl.jackknife[1]
       h22.jackknife[i] <- h22.hdl.jackknife[1]
       rg.jackknife[i] <- h12.hdl.jackknife[1]/sqrt(h11.hdl.jackknife[1]*h22.hdl.jackknife[1])
+      
+      if(intercept.output == T){
+        h11.intercept.jackknife[i] <- h11.hdl.jackknife[2]
+        h12.intercept.jackknife[i] <- h12.hdl.jackknife[2]
+        h22.intercept.jackknife[i] <- h22.hdl.jackknife[2]
+      }
       
       ## Report progress ##
       
@@ -596,11 +695,25 @@ HDL.rg <-
     h22.se <-  sqrt(mean((h22.jackknife - mean(h22.jackknife))^2)*(length(h22.jackknife) - 1))
     rg.se <-  sqrt(mean((rg.jackknife - mean(rg.jackknife))^2)*(length(rg.jackknife) - 1))
     P <- pchisq((rg/rg.se)^2, df = 1, lower.tail = FALSE)
-    estimates.df <- matrix(c(h11,h22,h12,rg, 
-                             h11.se,h22.se,h12.se,rg.se),
-                           nrow=4,ncol=2)
-    rownames(estimates.df) <- c("Heritability_1", "Heritability_2", "Genetic_Covariance", "Genetic_Correlation")
-    colnames(estimates.df) <- c("Estimate", "se")
+    
+    if(intercept.output == FALSE){
+      estimates.df <- matrix(c(h11,h22,h12,rg, 
+                               h11.se,h22.se,h12.se,rg.se),
+                             nrow=4,ncol=2)
+      rownames(estimates.df) <- c("Heritability_1", "Heritability_2", "Genetic_Covariance", "Genetic_Correlation")
+      colnames(estimates.df) <- c("Estimate", "se")
+    } else{
+      h11.intercept.se <-  sqrt(mean((h11.intercept.jackknife - mean(h11.intercept.jackknife))^2)*(length(h11.intercept.jackknife) - 1))
+      h12.intercept.se <-  sqrt(mean((h12.intercept.jackknife - mean(h12.intercept.jackknife))^2)*(length(h12.intercept.jackknife) - 1))
+      h22.intercept.se <-  sqrt(mean((h22.intercept.jackknife - mean(h22.intercept.jackknife))^2)*(length(h22.intercept.jackknife) - 1))
+      estimates.df <- matrix(c(h11,h22,h12,rg, h11.intercept, h22.intercept, h12.intercept,
+                               h11.se,h22.se,h12.se,rg.se, h11.intercept.se, h22.intercept.se, h12.intercept.se),
+                             nrow=7,ncol=2)
+      rownames(estimates.df) <- c("Heritability_1", "Heritability_2", "Genetic_Covariance", "Genetic_Correlation", 
+                                  "Heritability_1_intercept", "Heritability_2_intercept", "Genetic_Covariance_intercept")
+      colnames(estimates.df) <- c("Estimate", "se")
+    }
+    
     
     
     
@@ -673,4 +786,4 @@ HDL.rg <-
     }
     
     return(list(rg = rg, rg.se = rg.se, P = P, estimates.df = estimates.df, eigen.use = eigen.use))
-    }
+  }

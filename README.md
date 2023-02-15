@@ -1,3 +1,16 @@
+HDL has been updated to v1.4.0 (2021-04-15)
+------------
+
+* Add LD reference building pipline. Please see [Build a reference panel](https://github.com/zhenin/HDL/wiki/Build-a-reference-panel) for more information.
+* Adjust code of loading LD reference for the compatibility of customized LD reference.
+
+HDL has been updated to v1.3.10 (2020-04-05)
+------------
+* A new optional argument `fill.missing.N` is added in both the R version and the command line version. If NULL (default), the SNPs with missing N are removed. One of "median", "min" or "max" can be given so that the missing N will be filled accordingly. For example, "median" means the missing N are filled with the median N of the SNPs with available N.
+* A new optional argument `intercept.output` is added in the R version for those who are interested in. By setting `intercept.output=TRUE`, the intercept terms estimates and se will be reported in estimates.df.
+* A bug related to multiallelic or duplicated SNPs is fixed.
+* Codes have been added to handle when column `b` is OR instead of log(OR).
+
 HDL has been updated to v1.3.9 (2020-11-24)
 ------------
 *   SNPs without N information are now excluded during data loading. 
@@ -55,7 +68,7 @@ For direct R documentation of `HDL.rg` function, you can use a question mark in 
 
 Some bugs might have been reported and solved in the latest version of `HDL`. Therefore, please make sure your `HDL` has been updated to the latest version (see [here](https://github.com/zhenin/HDL/wiki/Installation-and-update#Updating-HDL) for how to update `HDL`).
 
-If you have questions, you may find the [FAQ](https://github.com/zhenin/HDL/wiki/FAQ) page is helpful. If you want further discussion or still have questions, please feel free to email the maintainer of `HDL` via <zheng.ning@ki.se>.
+If you have questions, you may find the [FAQ](https://github.com/zhenin/HDL/wiki/FAQ) page is helpful. If you want further discussion or still have questions, please feel free to email the maintainer of `HDL` via <xia.shen@ki.se>.
 
 Acknowledgement
 --------
