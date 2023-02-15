@@ -19,9 +19,11 @@ if(length(output.file) == 0){
   length(output.file) <- ""
 }
 
+# CHANGED stopping if file exists
 if(output.file != ""){
   if(file.exists(output.file) == T){
-    system(paste0("rm ",output.file))
+    stop("file exists")
+    #system(paste0("rm ",output.file))
   }
 }
 

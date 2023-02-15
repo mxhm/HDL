@@ -17,6 +17,13 @@ Z <- gsub(x = args[grep(x = args, pattern = "Z=")], pattern = "Z=", replacement 
 if(length(output.file) == 0)
   output.file <- fn
 
+fn.rds <- paste0(output.file, ".hdl.rds")
+
+# ADDED don't rerun if file exists
+if(file.exists(fn.rds)){
+  stop("file exists")
+}
+
 if(length(log.file) != 0){
   log.file <- paste(log.file, "txt", sep = ".")
   if(file.exists(log.file) == T){

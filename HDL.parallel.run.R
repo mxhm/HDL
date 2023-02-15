@@ -33,7 +33,9 @@ if(length(output.file) == 0){
 
 if(output.file != ""){
   if(file.exists(output.file) == T){
-    system(paste0("rm ",output.file))
+    # CHANGED don't rerun if file exists
+    stop("file exists")
+    #system(paste0("rm ",output.file))
   }
 }
 
